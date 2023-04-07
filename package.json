@@ -14,17 +14,28 @@
 	"main": "./dist/index.js",
 	"typings": "./dist/index.d.ts",
 	"type": "module",
+	"bin": {
+		"mimic": "./bin/index.js"
+	},
+	"files": [
+		"bin",
+		"dist",
+		"src",
+		"package.json",
+		"README.md"
+	],
 	"scripts": {
 		"build": "npm run build:prepare && npm run build:index && npm run build:types && vite build",
 		"build:types": "tsc --project ./src/tsconfig.json",
 		"build:index": "pnpm tsm ./scripts/create-index.ts",
 		"build:prepare": "rimraf dist",
 		"update:deps": "pnpm update --latest --interactive",
-		"increment-version": "node --loader tsm ./scripts/increment-version.ts"
+		"increment-version": "node ./bin/index.js increment-version"
 	},
 	"dependencies": {
 		"@swc/core": "^1.3.46",
-		"tslib": "^2.5.0"
+		"tslib": "^2.5.0",
+		"yargs": "^17.7.1"
 	},
 	"devDependencies": {
 		"@roenlie/eslint-config": "^1.0.0",

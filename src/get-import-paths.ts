@@ -22,6 +22,7 @@ async function* getFiles(directory: string, pattern?: RegExp): AsyncGenerator<st
 	}
 }
 
+
 const _getImportPaths = (filepath: string) => {
 	const fileContent = Fs.readFileSync(filepath, { encoding: 'utf8' });
 	const paths = new Set<string>();
