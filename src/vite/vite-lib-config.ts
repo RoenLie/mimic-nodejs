@@ -2,15 +2,12 @@ import { globby } from 'globby';
 import { resolve } from 'path';
 import { UserConfigExport } from 'vite';
 
-import { getAllExternalImportPaths } from './get-import-paths.js';
+import { getExternalImportPaths } from '../get-import-paths.js';
 
 
 export const libConfig: () => Promise<UserConfigExport> = async () => {
 	/* find all external dependency paths used. */
-	const externalImportPaths = await getAllExternalImportPaths(
-		'./src',
-		[ ],
-	);
+	const externalImportPaths = await getExternalImportPaths('./src');
 
 	return {
 		/** Do not include the public directory in the package output. */

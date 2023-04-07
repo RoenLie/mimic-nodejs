@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { Plugin, ResolvedConfig } from 'vite';
 
-import { createTagCache, getUsedTags } from './create-tag-cache.js';
+import { createTagCache, getUsedTags } from '../create-tag-cache.js';
 
 
 export type AutoImportPluginProps = {
