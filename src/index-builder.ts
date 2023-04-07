@@ -35,19 +35,20 @@ export const indexBuilder = async (
 		.map(rawPath => ({ rawPath, path: rawPath.replaceAll('\\', '/') }))
 		.filter(({ path }) => pathMatchers.some(fn => fn(path)));
 
-	/** Creates the regex used to check if an export contains an `@internal` flag */
-	const createInternalRegex = (value: string) => new RegExp('\\/\\*\\*.+?' + exclusionJSDocTag + '.+?' + value, 's');
-
 	/* Extract exports from the files through ast parsing. */
 	const exports = await Promise.all(filePaths.map(async ({ rawPath, path }) => {
 		const content: string = await fs.promises.readFile(rawPath, { encoding: 'utf8' });
-		const ast = await swcParse(content, { syntax: 'typescript', decorators: true, comments: true, target: 'es2022' });
+		const ast = await swcParse(
+			content, { syntax: 'typescript', decorators: true, comments: true, target: 'es2022' },
+		);
 
-		const symbolTypes = [ 'ClassDeclaration', 'FunctionDeclaration', 'VariableDeclaration' ];
-		const typeTypes = [ 'TsTypeAliasDeclaration', 'TsInterfaceDeclaration', 'TsModuleDeclaration' ];
+		const symbolTypes = [ 'ClassDeclaration',       'FunctionDeclaration',    'VariableDeclaration' ];
+		const typeTypes   = [ 'TsTypeAliasDeclaration', 'TsInterfaceDeclaration', 'TsModuleDeclaration' ];
 
 		const symbolExports = new Set<string>();
 		const typeExports = new Set<string>();
+
+		const exportTokenMap = new Map(tokenizeExports(content).map(exp => [ exp.name, exp.jsdoc ]));
 
 		iterate(ast.body)
 			.pipe(item => {
@@ -89,7 +90,7 @@ export const indexBuilder = async (
 					}
 					}
 
-					if (!createInternalRegex(newValue.value).test(content))
+					if (!exportTokenMap.get(newValue.value)?.includes(exclusionJSDocTag))
 						symbolExports.add(newValue.value);
 				}
 
@@ -103,7 +104,7 @@ export const indexBuilder = async (
 						newValue.value = declaration.id.value;
 					}
 
-					if (!createInternalRegex(newValue.value).test(content))
+					if (!exportTokenMap.get(newValue.value)?.includes(exclusionJSDocTag))
 						typeExports.add(newValue.value);
 				}
 			})
@@ -171,4 +172,28 @@ export const indexBuilder = async (
 		/* Write the new index file. */
 		await fs.promises.writeFile(pathTarget, lines.join('\n'));
 	}
+};
+
+
+interface ExportToken {
+	name: string;
+	jsdoc: string;
+}
+
+
+/** @internalexport */
+export const tokenizeExports = (content: string): ExportToken[] => {
+	const exportTokens: ExportToken[] = [];
+	const exportRegex = /(?:\/\*\*(?:\s|\S)*?\*\/\s*)?export\s+(?:\w+\s+)?(\w+)/g;
+
+	let match;
+	while ((match = exportRegex.exec(content)) !== null) {
+		const jsdocComment = match[0].startsWith('/**') ? match[0].split('*/')[0] + '*/' : '';
+		exportTokens.push({
+			name:  match[1]!,
+			jsdoc: jsdocComment,
+		});
+	}
+
+	return exportTokens;
 };
