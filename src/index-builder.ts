@@ -1,9 +1,10 @@
-import { ExportDeclaration, parse as swcParse } from '@swc/core';
+import { parse as swcParse } from '@swc/core';
 import fs from 'fs';
 import { parse, resolve } from 'path';
 
 import { genToArray } from './gen-to-array.js';
 import { getFiles } from './get-files.js';
+import { iterate } from './utilities/iterator.js';
 
 
 /**
@@ -17,12 +18,6 @@ export const indexBuilder = async (
 		exclusionJSDocTag?: string;
 	},
 ) => {
-	type Exports = {
-		symbols: string[],
-		types: string[],
-		path: string,
-	}
-
 	/* destructured options */
 	const { exclusionJSDocTag = '@internalexport' } = options ?? {};
 
@@ -44,83 +39,103 @@ export const indexBuilder = async (
 	const createInternalRegex = (value: string) => new RegExp('\\/\\*\\*.+?' + exclusionJSDocTag + '.+?' + value, 's');
 
 	/* Extract exports from the files through ast parsing. */
-	const exports = await Promise.all(filePaths.map<Promise<Exports>>(async ({ rawPath, path }) => {
+	const exports = await Promise.all(filePaths.map(async ({ rawPath, path }) => {
 		const content: string = await fs.promises.readFile(rawPath, { encoding: 'utf8' });
 		const ast = await swcParse(content, { syntax: 'typescript', decorators: true, comments: true, target: 'es2022' });
 
-		const exportDeclarations = ast.body.filter((entry): entry is ExportDeclaration => entry.type === 'ExportDeclaration');
-		const symbols = exportDeclarations
-			.filter(({ declaration }) =>
-				declaration.type === 'ClassDeclaration' ||
-				declaration.type === 'FunctionDeclaration' ||
-				declaration.type === 'VariableDeclaration')
-			.map(({ declaration }) => {
-				if (declaration.type === 'ClassDeclaration') {
-					return declaration.identifier.value;
-				}
-				else if (declaration.type === 'FunctionDeclaration') {
-					return declaration.identifier.value;
-				}
-				else if (declaration.type === 'VariableDeclaration') {
-					const varDeclarations = declaration.declarations.map(dec => {
-						if (dec.id.type === 'Identifier')
-							return dec.id.value;
-					}).filter(Boolean).join(',');
+		const symbolTypes = [ 'ClassDeclaration', 'FunctionDeclaration', 'VariableDeclaration' ];
+		const typeTypes = [ 'TsTypeAliasDeclaration', 'TsInterfaceDeclaration', 'TsModuleDeclaration' ];
 
-					return varDeclarations;
-				}
-				else {
-					throw new Error(`Unsupported declaration.type='${ declaration.type }'`);
-				}
-			}).filter(value => {
-				// filter out any exports with a jsdoc @internal
-				return !createInternalRegex(value).test(content);
-			});
+		const symbolExports = new Set<string>();
+		const typeExports = new Set<string>();
 
-		const types = exportDeclarations
-			.filter(({ declaration }) =>
-				declaration.type === 'TsTypeAliasDeclaration' ||
-				declaration.type === 'TsInterfaceDeclaration' ||
-				declaration.type === 'TsModuleDeclaration')
-			.map(({ declaration }) => {
-				switch (declaration.type) {
-				case 'TsTypeAliasDeclaration':
-				case 'TsInterfaceDeclaration':
-				case 'TsModuleDeclaration':
-					return declaration.id.value;
-				default:
-					throw new Error(`Unsupported declaration.type='${ declaration.type }'`);
+		iterate(ast.body)
+			.pipe(item => {
+				if (item.type !== 'ExportDeclaration')
+					return;
+
+				if (symbolTypes.includes(item.declaration.type)) {
+					return {
+						type:        'symbol' as const,
+						declaration: item.declaration,
+					};
 				}
-			}).filter(value => {
-				// filter out any exports with a jsdoc @internal
-				return !createInternalRegex(value).test(content);
-			});
+
+				if (typeTypes.includes(item.declaration.type)) {
+					return {
+						type:        'type' as const,
+						declaration: item.declaration,
+					};
+				}
+			})
+			.pipe(({ type, declaration }) => {
+				if (type === 'symbol') {
+					const newValue = { type: 'symbol' as const, value: '' };
+
+					switch (declaration.type) {
+					case 'ClassDeclaration':
+					case 'FunctionDeclaration': {
+						newValue.value = declaration.identifier.value;
+						break;
+					}
+					case 'VariableDeclaration': {
+						const varDeclarations = declaration.declarations.map(dec => {
+							if (dec.id.type === 'Identifier')
+								return dec.id.value;
+						}).filter(Boolean).join(',');
+
+						newValue.value = varDeclarations;
+						break;
+					}
+					}
+
+					if (!createInternalRegex(newValue.value).test(content))
+						symbolExports.add(newValue.value);
+				}
+
+				if (type === 'type') {
+					const newValue = { type: 'type' as const, value: '' };
+
+					switch (declaration.type) {
+					case 'TsTypeAliasDeclaration':
+					case 'TsInterfaceDeclaration':
+					case 'TsModuleDeclaration':
+						newValue.value = declaration.id.value;
+					}
+
+					if (!createInternalRegex(newValue.value).test(content))
+						typeExports.add(newValue.value);
+				}
+			})
+			.toArray();
 
 		return {
-			symbols,
-			types,
 			path,
+			symbols: [ ...symbolExports ],
+			types:   [ ...typeExports ],
 		};
 	}));
 
-	/* Create the file content of the symbols */
-	const symbolLines = exports.filter(({ symbols }) => symbols.length > 0).map(({ symbols, path }) => {
-		return { path, line: `export { ${ symbols.join(', ') } } from '${ path.replace('.ts', '.js') }';` };
-	});
+	let lines = exports.reduce((prev, { path, symbols, types }) => {
+		if (symbols.length) {
+			let line = `export { ${ symbols.join(', ') } } from '${ path.replace('.ts', '.js') }';`;
+			prev.push(line.replace(dirTarget.replaceAll('\\', '/'), '.'));
+		}
+		if (types.length) {
+			let line = `export type { ${ types.join(', ') } } from '${ path.replace('.ts', '.js') }';`;
+			prev.push(line.replace(dirTarget.replaceAll('\\', '/'), '.'));
+		}
 
-	/* Create the file content of the types */
-	const typeLines = exports.filter(({ types }) => types.length > 0).map(({ types, path }) => {
-		return { path, line: `export type { ${ types.join(', ') } } from '${ path.replace('.ts', '.js') }';` };
-	});
-
-	/* Sorts on path and picks the line */
-	const lines = [ ...symbolLines, ...typeLines ]
-		.sort((entryA, entryB) => entryA.path > entryB.path ? 1 : -1)
-		.map(({ line }) => line.replace(dirTarget.replaceAll('\\', '/'), '.'));
+		return prev;
+	}, [] as string[]);
 
 	/* Check if there is an existing index file, and retrieve the contents */
 	fs.mkdirSync(dirTarget, { recursive: true });
-	const existingIndex = fs.existsSync(pathTarget) ? await fs.promises.readFile(pathTarget, { encoding: 'utf8' }) : '';
+
+	const existingIndex = fs.existsSync(pathTarget)
+		? await fs.promises.readFile(pathTarget, { encoding: 'utf8' })
+		: '';
+
 	const existingLines = existingIndex.split('\n').filter(l => l.startsWith('export'));
 
 	/* compares two arrays and returns if they have the same entries, does not care about sort */

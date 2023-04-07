@@ -26,9 +26,9 @@
 	],
 	"scripts": {
 		"build": "npm run build:prepare && npm run build:index && npm run build:types && vite build",
-		"build:types": "tsc --project ./src/tsconfig.json",
-		"build:index": "pnpm tsm ./scripts/create-index.ts",
 		"build:prepare": "rimraf dist",
+		"build:index": "pnpm tsm ./scripts/create-index.ts",
+		"build:types": "tsc --project ./src/tsconfig.json",
 		"update:deps": "pnpm update --latest --interactive",
 		"increment-version": "node ./bin/index.js increment-version"
 	},
