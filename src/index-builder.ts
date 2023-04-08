@@ -184,16 +184,19 @@ interface ExportToken {
 /** @internalexport */
 export const tokenizeExports = (content: string): ExportToken[] => {
 	const exportTokens: ExportToken[] = [];
-	const exportRegex = /(?:\/\*\*(?:\s|\S)*?\*\/\s*)?export\s+(?:\w+\s+)?(\w+)/g;
+	const exportRegex = /(?:\/\*\*(?:\s|\S)*?\*\/\s*)?export\s+(?:\w+\s+)?([\w*]+)?\s+(\w+)/g;
 
-	let match;
-	while ((match = exportRegex.exec(content)) !== null) {
-		const jsdocComment = match[0].startsWith('/**') ? match[0].split('*/')[0] + '*/' : '';
+	const matches = [ ...content.matchAll(exportRegex) ];
+	matches.forEach(([ comment, , name ]) => {
+		const jsdocComment = comment.startsWith('/**')
+			? comment.split('*/')[0] + '*/'
+			: '';
+
 		exportTokens.push({
-			name:  match[1]!,
+			name:  name ?? '',
 			jsdoc: jsdocComment,
 		});
-	}
+	});
 
 	return exportTokens;
 };
